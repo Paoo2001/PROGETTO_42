@@ -1,0 +1,28 @@
+!pip install torchio
+import os
+from google.colab import drive
+drive.mount('/content/drive/')
+import torchio as tio
+import nibabel as nib
+import numpy as np
+
+data_dir = '/content/drive/MyDrive/test set'  # directory della cartella "data" (già importata su drive)
+
+# Creazione di una lista di patients_ID
+patients_ID = []
+for f in os.scandir(data_dir): # restituisce un iteratore sugli elementi presenti nella directory "data_dir"
+  if f.is_dir(): # se l'elemento è una directory, allora viene aggiungo alla lista
+    patients_ID.append(f.name) # riempimento della lista patients_ID con tutti i nomi delle directory che sono contenuti in data e soddisfano l'if
+
+# Creazione di una lista patients_list
+patients_list = []
+for current in patients_ID:
+  subj_dir = data_dir +'/'+ current
+  rcbv=nib.load(subj_dir +'/DSC_ap-rCBV.nii')
+  rcbvnp=rcbv.get_fdata()
+  mask=np.where(rcbvnp > 0 , 1, 0)
+  out = nib.Nifti1Image(mask, header=rcbv.header, affine=rcbv.affine)
+  nib.save(out, subj_dir+'/brain_mask.nii')
+  #os.remove(subj_dir+'/brain_mask.nii.gz')
+
+
