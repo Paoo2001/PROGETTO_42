@@ -1,0 +1,721 @@
+**DATASET DSC MRI**
+
+!pip install numpy torch torchvision torchio matplotlib torchinfo torchmetrics
+
+# imports
+import torch
+import torchio as tio
+import numpy as np
+import os
+from torchinfo import summary
+import skimage #serve per elaborazione immagini (nel nostro caso usiamo per le metriche)
+import torch.nn as nn #ci sono moduli per alcuni modelli neurali, regressione, convoluzione ecc
+import torch.nn.functional as F #qui invece ci possono essere buoni comandi per kernel, filtraggi, max pooling e cose così
+import shutil
+import torchvision
+from torchvision import models, transforms as tt
+import matplotlib.pyplot as plt
+import nibabel as nib #libreria per la gestion di file .nii
+from skimage.metrics import mean_squared_error as mse
+from skimage.metrics import structural_similarity as ssim
+from skimage.metrics import peak_signal_noise_ratio as psnr
+from skimage.metrics import normalized_root_mse as nrmse
+from google.colab import drive
+drive.mount('/content/drive/') #Ora necessario caricare su drive le cartelle, necessario però un metodo alternativo (caricare i file dal locale) COME?
+
+data = '/content/drive/MyDrive/Dataset filtrato'  # directory
+patients_ID = []
+for f in os.scandir(data):
+  if f.is_dir():
+    patients_ID.append(f.name) # riempimento della lista patients_ID con tutti i nomi delle directory che sono contenuti in data e soddisfano l'if
+
+patients_list = []
+for current in patients_ID:
+  subj_dir = data +'/'+ current
+
+  #Creazione di un'istanza
+  patient = tio.Subject(
+      DSC= tio.ScalarImage(subj_dir + '/DSC.nii'),
+      rCBV = tio.ScalarImage(subj_dir + '/DSC_ap-rCBV.nii'),
+      #brain_mask = tio.LabelMap(subj_dir + '/brain_mask.nii')
+      ) # ogni paziente contiene nome, immagine DSC e immagine rCBV
+
+# Aggiungere la maschera cerebrale all'oggetto tio.Subject
+  patients_list.append(patient)    # aggiunta di patient alla lista patients_list
+
+
+Conversione del dataset creato in tensore
+
+#Creazione Dataset
+dataset = tio.SubjectsDataset(patients_list)
+print('Dataset size:', len(dataset), 'patients')
+
+#print(dataset.dry_iter())
+
+#for i in range(len(dataset)):
+#  print(f"paziente {i}:")
+#  subject = dataset[i]
+#  for key, image in subject.items():
+#    tensor = image.data
+#    print(f"  {key}: {tensor.shape}")
+
+#creazione mask
+#  rcbv_img=nib.load(subj_dir + "/DSC_ap-rCBV.nii")
+  # converte l'immagine rCBV in un tensore PyTorch
+#  rcbv_tensor = torch.from_numpy(rcbv_img.get_fdata())
+#  # crea la brain_Mask selezionando i valori maggiori di 0
+#  brain_mask = torch.where(rcbv_tensor > 0, torch.tensor([1]), torch.tensor([0]))
+#  # crea un oggetto Nifti1Image a partire dal tensore PyTorch della brain_mask
+#  brain_mask_nifti = nib.Nifti1Image(brain_mask.numpy(), rcbv_img.affine)
+#  # salva l'immagine della brain_mask come file NIfTI-1 nella cartella
+#  nib.save(brain_mask_nifti, subj_dir + '/brain_mask.nii')
+
+
+#brain_mask = tio.LabelMap(subj_dir + '/brain_mask.nii')
+#patient_x.brain_mask.plot()
+#tio.ZNormalization(masking_method='brain_mask'),
+
+# verifica su un paziente delle proprietà delle immagini
+#patient_x = dataset[1] # numero casuale
+#print('Shape of DSC images', patient_x.DSC.shape)
+#print('Size of DSC images', patient_x.DSC.spacing)
+#print('Shape of rCBV images', patient_x.rCBV.shape)
+#print('Size of rCBV images', patient_x.rCBV.spacing)
+#print('Size of brain mask', patient_x.brain_mask)
+#patient_x.brain_mask.plot()
+
+PREPARAZIONE DEI DATI (TRASFORMAZIONI)
+
+Data for Training set and Validation set
+
+# suddivisione del dataset, in modo casuale, in dati di training (70% dei dati) e di validation (20% dei dati).
+#training_division = 0.7   # definizione della % di dati di training
+#validation_division = 0.2 # definizione della % di dati di validation
+#test_division = 0.1
+
+#num_patients = len(dataset) # pazienti totali
+#training_patients = int(training_division*num_patients)
+#validation_patients = int(validation_division*num_patients)
+#test_patients = int(num_patients-(training_patients+validation_patients))
+
+# creazione dei due sottoinsiemi
+#patients_division = training_patients, validation_patients, test_patients
+#training, validation, testing = torch.utils.data.random_split(patients_list, patients_division)
+
+#training_set = tio.SubjectsDataset(training)
+#print('training_set:', len(training_set)) # per verificare il numero di dati di training
+#validation_set = tio.SubjectsDataset(validation)
+#print('validation_set:', len(validation_set))
+#test_set = tio.SubjectsDataset(testing)
+#print('test_set:', len(test_set))
+
+VERSIONE ALTERNATIVA CON IL TEST CHE PRENDE I PRIMI 20 PAZIENTI DEL DATASET IN MODO DA POTER FARE IL TEST DI WILCOXON ALLA FINE.
+
+test_set = tio.SubjectsDataset(patients_list[:20])  # Primi 20 pazienti per il testing set (in ordine)
+remaining_patients = tio.SubjectsDataset(patients_list[20:]) # Pazienti rimanenti per il training e validation set
+
+num_patients = len(remaining_patients)
+training_patients = 131
+validation_patients = 37
+
+# creazione dei due sottoinsiemi
+patients_division = training_patients, validation_patients
+training, validation = torch.utils.data.random_split(remaining_patients, patients_division)
+
+training_set = tio.SubjectsDataset(training)
+print('training_set:', len(training_set)) # per verificare il numero di dati di training
+validation_set = tio.SubjectsDataset(validation)
+print('validation_set:', len(validation_set))
+# test_set = tio.SubjectsDataset(testing)
+print('test_set:', len(test_set))
+
+#PAZIENTI DEL TEST SET
+test_set_folders = [os.path.basename(os.path.dirname(subject['DSC'].path)) for subject in test_set]
+test_set_folders_sorted = sorted(test_set_folders)
+
+for folder_name in test_set_folders_sorted:
+    print(folder_name)
+
+#PAZIENTI DEL TRAINING SET
+test_set_folders = [os.path.basename(os.path.dirname(subject['DSC'].path)) for subject in training_set]
+test_set_folders_sorted = sorted(test_set_folders)
+
+for folder_name in test_set_folders_sorted:
+    print(folder_name)
+
+#PAZIENTI DEL VALIDATION SET
+test_set_folders = [os.path.basename(os.path.dirname(subject['DSC'].path)) for subject in validation_set]
+test_set_folders_sorted = sorted(test_set_folders)
+
+for folder_name in test_set_folders_sorted:
+    print(folder_name)
+
+#training_set[0]["DSC"].plot()
+#training_set[0]["rCBV"].plot()
+
+#print('Shape of DSC images', training_set[0]["DSC"][tio.DATA].shape)
+
+#print('Shape of rCBV images', training_set[0]["rCBV"][tio.DATA].shape)
+
+##COME VISUALIZZARE TIPO E IMMAGINE INPUT OUTPUT
+
+#training_set[0].DSC, training_set[0].rCBV
+
+#visualizzare un'immagine specifica
+#nii_image = tio.ScalarImage('/content/drive/MyDrive/Data/UPENN-GBM-00001_11/DSC.nii')
+#nii_array = nii_image.numpy() #bisogna trasformare l'immagin ein vettore con il comando numpy()
+#plt.imshow(nii_array[1, :, :, 50], cmap='gray') #time_frame,x,y,z
+#plt.show()
+
+#visualizzare un dataset
+#paziente_1 = dataset[0]
+#paziente_1.plot() #vedo sia DSC che rCBV
+#patient.DSC.plot() #vedo solo DSC plot
+#patient.rCBV.plot() #vedo solo rCBV plot
+
+#def masking(dataset):
+#  for i in range(len(dataset)):
+#    mask = dataset[i]["DSC"][tio.DATA] > 0
+#   print(mask.shape)
+#    dataset[i]["mask"] = mask
+
+#masking(dataset)
+
+#dataset[0]["mask"].plot()
+#dataset[1]["mask"].plot()
+
+ #visualizzare info
+#print(paziente_1.DSC.shape)
+#mask = dataset[0]["DSC"][tio.DATA]>0
+#print(mask.shape)
+
+#print(paziente_1.DSC)
+#print(paziente_1.rCBV)
+
+Data Augmentation
+
+##Creazione del DataLoader
+
+#check num_cores disponibili
+import multiprocessing
+cores = multiprocessing.cpu_count() # per contare il numero di cpu che si hanno
+cores
+
+from torch.utils.data.dataloader import DataLoader
+batch_size = 4 # dimensione del batch
+train_loader = torch.utils.data.DataLoader(training_set,
+                                           batch_size,
+                                           shuffle = True,
+                                           num_workers=cores,
+                                           pin_memory=True) # shuffle = True indica che i dati vengono caricati in modo casuale
+val_loader = torch.utils.data.DataLoader(validation_set,
+                                         batch_size*2,
+                                         shuffle = False,
+                                         num_workers=cores,  #metto tanti cores quanti ne ho disponibili
+                                         pin_memory=True)  # i dati vengono caricati in ordine
+
+### Sposto il DataLoader e i dati sulla GPU
+
+# Verifico che la GPU sia disponibile
+torch.cuda.is_available() # Resistuisce 'True' se la GPU è accessibile
+
+def get_default_device():
+    # Se è disponibile prende la GPU, altrimenti la CPU locale
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+    else:
+        return torch.device('cpu')
+
+def to_device(data, device):
+    if isinstance(data, (list,tuple)):
+      return [to_device(x, device) for x in data]
+    return data.to(device, non_blocking=True)
+
+class DeviceDataLoader():
+    # Wrapping del DataLoader per spostare i dati sul device
+    def __init__(self, dl, device):
+        self.dl = dl
+        self.device = device
+
+    def __iter__(self):
+        # Restituisce un batch di dati spostandolo sulla GPU
+        for b in self.dl:
+            yield to_device(b, self.device) if isinstance(b, torch.Tensor) else b
+
+    def __len__(self):
+        # Numero di batch
+        return len(self.dl)
+
+device = get_default_device()
+device
+
+device = torch.device('cuda')  # imposta il dispositivo sulla GPU
+
+train_loader = DeviceDataLoader(train_loader, device)  # crea un DeviceDataLoader "avvolgendo" (wrapping) il train_loader
+val_loader = DeviceDataLoader(val_loader, device) # idem per il val_loader
+# checkper verificare dove lavora il device
+print(device)
+
+CREAZIONE DEL MODELLO
+
+#type(training_set[0].DSC),
+#training_set[0]["rCBV"].data #1: dice il tipo di dato che si ha #2: printa il contenuto del tensore
+
+#def show_batch_DSC(data_loader):
+#  for batch_idx, batch_sample in enumerate(data_loader):
+#    images = batch_sample["DSC"][tio.DATA]
+#    img_DSC = images[0, 0, :, :, 50] #prendo solo la prima immagine, le x e le y della 50 fetta sulle z del time frame 0.
+
+#    # Visualizzazione delle prime 4 immagini della batch
+#    plt.imshow(img_DSC, cmap="gray")
+#    plt.show()    # Interrompi l'iterazione dopo la prima batch
+#    break
+
+#show_batch_DSC(train_loader)
+
+def prepare_batch(batch, device): # estrae l'input e l'output desiderati da una singola batch di dati del loader e li restituisce come tensori PyTorch
+    inputs = batch["DSC"][tio.DATA].to(device) # tensore
+    targets = batch["rCBV"][tio.DATA].to(device) # tensore
+    return inputs, targets
+
+class ImageClassificationBase(nn.Module):
+    def training_step(self, batch):
+        inputs, targets = prepare_batch(batch, device)
+        #print(inputs.shape)
+        #print(targets.shape)
+        out = self(inputs)  # Generate predictions
+        #print(out.shape)
+        loss = F.mse_loss(out, targets) # Calculate loss
+        #print("Fine train")
+        return loss
+
+    def validation_step(self, loader):
+        inputs, targets = prepare_batch(loader, device)
+        out = self(inputs)     # Generate predictions
+        loss = F.mse_loss(out, targets)   # Calculate loss
+
+        targets = targets.cpu().detach().numpy()#converto in numpy perchè skimage lavora su tensori di questo tipo
+        out = out.cpu().detach().numpy()
+
+        #print(targets.shape, out.shape)
+
+        mse_ = np.square(np.subtract(targets, out)).mean() # Calculate mean square error
+        nrmse_ = nrmse(targets, out) # Calculate normalized root mean square error
+        ssim_ = structural_similarity_index_measure(torch.from_numpy(targets).to(torch.float32), torch.from_numpy(out).to(torch.float32), data_range = out.max() - out.min()) # Calculate structural similarity index
+        psnr_ = psnr(targets, out, data_range = out.max() - out.min()) # Calculate peak signal to noise ratio
+        return {'val_loss': loss.detach(), 'mse': mse_, 'nrmse': nrmse_, 'ssim': ssim_, 'psnr':psnr_}
+
+    def validation_epoch_end(self, outputs):
+      batch_losses = [x['val_loss'] for x in outputs]
+      epoch_loss = torch.stack(batch_losses).mean()   # Combine losses
+      batch_mses = [x['mse'] for x in outputs]
+      epoch_mse = np.mean(batch_mses)   # Combine mses
+      batch_nrmses = [x['nrmse'] for x in outputs]
+      epoch_nrmse = np.mean(batch_nrmses)  # Combine nrmses
+      batch_ssims = [x['ssim'] for x in outputs]
+      epoch_ssim = np.mean(batch_ssims)   # Combine ssims
+      batch_psnrs = [x['psnr'] for x in outputs]
+      epoch_psnr = np.mean(batch_psnrs) # Combine psnrs
+      return {'val_loss': epoch_loss.item(), 'mse': epoch_mse.item(), 'nrmse': epoch_nrmse.item(), 'ssim': epoch_ssim.item(), 'psnr':epoch_psnr.item()}
+
+    def epoch_end(self, epoch, result):
+      print("Epoch [{}], train_loss: {:.4f}, val_loss: {:.4f}, mse: {:.4f}, nrmse: {:.4f}, ssim: {:.4f}, psnr: {:.4f}".format(epoch+1, result['train_loss'], result['val_loss'], result['mse'], result['nrmse'], result['ssim'], result['psnr']))
+
+
+#creiamo il modello sequenziale per analizzare i dati, facendo un estensione del precedente modello (generico).
+
+class CNNModel(ImageClassificationBase):
+    def __init__(self):
+        super().__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.network = nn.Sequential(
+            #input.shape: 128 x 45 x 240 x 240 x 155
+            nn.Conv3d(45, 30, kernel_size=3, padding=1),
+            nn.BatchNorm3d(30, eps=1e-03, momentum=0.1), #3 input, 32 output, kernel 3x3, paggin 1, dim resta la stessa di input
+            #output.shape: 1 x 240 x 240 x 155
+            nn.LeakyReLU(),
+            nn.Conv3d(30, 25, kernel_size=3, padding=1),
+            nn.BatchNorm3d(25, eps=1e-03, momentum=0.1),
+            nn.LeakyReLU(),
+            nn.Conv3d(25, 20, kernel_size=3, padding=1),
+            nn.BatchNorm3d(20, eps=1e-03, momentum=0.1),
+            nn.LeakyReLU(),
+            nn.Conv3d(20, 15, kernel_size=3, padding=1),
+            nn.BatchNorm3d(15, eps=1e-03, momentum=0.1),
+            nn.LeakyReLU(),
+            nn.Conv3d(15, 10, kernel_size=3, padding=1),
+            nn.BatchNorm3d(10, eps=1e-03, momentum=0.1),
+            nn.LeakyReLU(),
+            nn.Conv3d(10, 5, kernel_size=3, padding=1),
+            nn.BatchNorm3d(5, eps=1e-03, momentum=0.1),
+            nn.LeakyReLU(),
+            nn.Conv3d(5, 1, kernel_size=3, padding=1),
+            nn.BatchNorm3d(1, eps=1e-03, momentum=0.1),
+            nn.LeakyReLU())
+
+    def forward(self, xb):
+      xb = xb.to(torch.float)
+      out = self.network(xb)
+      return out
+
+model = CNNModel()#.to('cuda')
+# sposto il modello sulla GPU
+model = to_device(model, device)
+#print(model)
+#print('Modello su dispositivo:', next(model.parameters()).device)
+
+summary(model.cuda(), input_size=(4,45,60,60,40))
+
+**TRAINING DEL MODELLO**
+
+import time
+@torch.no_grad() #l'utilizzo di @torch.no_grad() all'interno della funzione evaluate() ha senso perché consente di disabilitare il calcolo del gradiente durante la fase di valutazione del modello, migliorando l'efficienza del processo di valutazione.
+
+def evaluate(model, val_loader):
+    strt_time = time.time()
+    model.eval()
+    outputs = [model.validation_step(batch) for batch in val_loader]
+    end_time = time.time()
+    tot_time = end_time-strt_time
+    print('Validation time:', tot_time, 'sec')
+    return model.validation_epoch_end(outputs)
+
+def get_lr(optimizer):
+    for param_group in optimizer.param_groups:
+        return param_group['lr']
+
+def fit_one_cycle(epochs, max_lr, model, train_loader, val_loader,
+                  weight_decay=0, grad_clip=None, opt_func=torch.optim.SGD, path_name='3DUNet_best_model'):
+    torch.cuda.empty_cache()
+    history = []
+
+    # Set up cutom optimizer with weight decay
+    optimizer = opt_func(model.parameters(), max_lr, weight_decay=weight_decay)
+    # Set up one-cycle learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr, epochs=epochs,
+                                                steps_per_epoch=len(train_loader))
+
+    for epoch in range(epochs):
+
+        strt_time = time.time()
+
+        # Training Phase
+        model.train()
+        train_losses = []
+        lrs = []
+        for batch in train_loader:
+
+            loss = model.training_step(batch)
+            train_losses.append(loss)
+            loss.backward()
+
+            # Gradient clipping
+            if grad_clip:
+                nn.utils.clip_grad_value_(model.parameters(), grad_clip)
+
+            optimizer.step()
+            optimizer.zero_grad()
+
+            # Record & update learning rate
+            lrs.append(get_lr(optimizer))
+            scheduler.step()
+
+        end_time = time.time()
+        tot_time = end_time-strt_time
+        print('Epoch training time:', tot_time, 'sec')
+
+        # Validation phase
+        result = evaluate(model, val_loader)
+        result['train_loss'] = torch.stack(train_losses).mean().item()
+        result['lrs'] = lrs
+        model.epoch_end(epoch, result)
+        history.append(result)
+
+        save_best_model(
+        result['val_loss'], epoch, model, optimizer, scheduler, criterion, path_name
+    )
+    return history
+
+from torchmetrics.functional import structural_similarity_index_measure
+
+class SaveBestModel:
+    """
+    Class to save the best model while training. If the current epoch's
+    validation loss is less than the previous least less, then save the
+    model state.
+    """
+    def __init__(
+        self, best_valid_loss=float('inf')
+    ):
+        self.best_valid_loss = best_valid_loss
+
+    def __call__(
+        self, current_valid_loss,
+        epoch, model, optimizer, scheduler, criterion, path_name
+    ):
+        if current_valid_loss < self.best_valid_loss:
+            self.best_valid_loss = current_valid_loss
+            print(f"\nBest validation loss: {self.best_valid_loss}")
+            print(f"\nSaving best model for epoch: {epoch+1}\n")
+            torch.save({
+                'epoch': epoch+1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'loss': criterion,
+                }, path_name+'.pth')
+
+# loss function
+criterion = nn.MSELoss()
+
+# optimizer
+optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=0.1)
+
+
+# scheduler
+scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.01, epochs=5,
+                                                steps_per_epoch=len(train_loader))
+
+# initialize SaveBestModel class
+save_best_model = SaveBestModel()
+
+#PRE VALUTAZIONE DEL MODELLO
+history0=evaluate(model, val_loader)
+history0
+
+#TRAINING EXP. 0(?)
+#history1=fit_one_cycle(14,0.01, model, train_loader, val_loader, weight_decay=0.01, grad_clip=20, opt_func=torch.optim.Adam )
+
+#TRAINING EXP. 1
+#history1=fit_one_cycle(3,0.01, model, train_loader, val_loader, weight_decay=0.01, grad_clip=20, opt_func=torch.optim.Adam )
+
+#TRAINING EXP. 2
+#history1=fit_one_cycle(40,0.01, model, train_loader, val_loader, weight_decay=0.01, grad_clip=20, opt_func=torch.optim.Adam )
+
+#TRAINING EXP. 3
+history1=fit_one_cycle(40,1e-5, model, train_loader, val_loader, weight_decay=0.01, grad_clip=20, opt_func=torch.optim.Adam )
+
+#TRAINING EXP. 4
+#history1=fit_one_cycle(3,0.01, model, train_loader, val_loader, weight_decay=0.01, grad_clip=20, opt_func=torch.optim.Adam )
+#history2 = fit_one_cycle(11, 0.001, model, train_loader, val_loader, weight_decay=0.01, grad_clip=20, opt_func=torch.optim.Adam )
+#history3=fit_one_cycle(3, 0.0001, model, train_loader, val_loader, weight_decay=0.01, grad_clip=20, opt_func=torch.optim.Adam)
+#history4=fit_one_cycle(3, 0.00001, model, train_loader, val_loader, weight_decay=0.01, grad_clip=20, opt_func=torch.optim.Adam)
+#history5=fit_one_cycle(3, 0.000001, model, train_loader, val_loader, weight_decay=0.01, grad_clip=20, opt_func=torch.optim.Adam)
+
+#TRAINING WILCOXON
+#history_wlcxn = fit_one_cycle(20, 0.001, model, train_loader, val_loader, weight_decay=0.01, grad_clip=20, opt_func=torch.optim.Adam)
+
+import numpy as np
+
+
+def plot_losses(history):
+    train_losses = [x.get('train_loss') for x in history]
+    val_losses = [x['val_loss'] for x in history]
+    plt.plot(train_losses, '-bx')
+    plt.plot(val_losses,'-x',color='#008B8B')
+    plt.xlabel('epoch')
+    plt.ylabel('loss')
+    plt.legend(['Training', 'Validation'])
+    plt.title('MSE Loss vs. No. of epochs');
+
+def plot_lrs(history):
+    lrs = np.concatenate([x.get('lrs', []) for x in history])
+    plt.plot(lrs)
+    plt.xlabel('Batch no.')
+    plt.ylabel('Learning rate')
+    plt.title('Learning Rate vs. Batch no.');
+
+def plot_ssim(history):
+    ssim = [x['ssim'] for x in history]
+    plt.plot(ssim, '-x')
+    plt.xlabel('epoch')
+    plt.ylabel('SSIM')
+    plt.title('SSIM vs. No. of epochs')
+    plt.show();
+
+def plot_MSE(history):
+    mse = [x['mse'] for x in history]
+    plt.plot(mse, '-x')
+    plt.xlabel('epoch')
+    plt.ylabel('MSE')
+    plt.title('MSE vs. No. of epochs')
+    plt.show();
+
+def plot_NRMSE(history):
+    nrmse = [x['nrmse'] for x in history]
+    plt.plot(nrmse, '-x')
+    plt.xlabel('epoch')
+    plt.ylabel('NRMSE')
+    plt.title('NRMSE vs. No. of epochs')
+    plt.show();
+
+def plot_PSNR(history):
+    psnr = [x['psnr'] for x in history]
+    plt.plot(psnr, '-x')
+    plt.xlabel('epoch')
+    plt.ylabel('PSNR')
+    plt.title('PSNR vs. No. of epochs')
+    plt.show();
+
+history=history1#+history2#+history3+history4+history5+history6
+
+plot_losses(history),
+plot_MSE(history),
+plot_NRMSE(history),
+plot_PSNR(history),
+plot_ssim(history),
+plot_lrs(history)
+
+# SAVE THE MODEL
+
+
+weights_path = '/content/cnn_state_dict.pth'
+
+torch.save(model.state_dict(), weights_path)
+
+model2 = to_device(CNNModel(), device)
+
+# load the best model checkpoint
+best_model_cp = torch.load('/content/cnn_state_dict.pth')
+#best_model_epoch = best_model_cp['epoch']
+#print(f"Best model was saved at {best_model_epoch} epochs\n")
+
+# loss function
+criterion = nn.MSELoss()
+
+# optimizer
+optimizer = torch.optim.Adam(model2.parameters(), lr=0.01, weight_decay=0.1)
+
+# scheduler
+scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.01, epochs=5,
+                                                steps_per_epoch=len(train_loader))
+
+# initialize SaveBestModel class
+save_best_model = SaveBestModel()
+
+#print('Loading best epoch saved model weights...')
+#model2.load_state_dict(best_model_cp['cnn_state_dict.pth'])
+## optimizer
+#optimizer.load_state_dict(best_model_cp['optimizer_state_dict'])
+## scheduler
+#scheduler.load_state_dict(best_model_cp['scheduler_state_dict'])
+
+# Salvo il modello
+torch.save(model.state_dict(), 'model.pth')
+
+import numpy as np
+from skimage.metrics import mean_squared_error, structural_similarity, peak_signal_noise_ratio
+from tensorflow.keras.models import load_model
+
+# Carica il modello addestrato
+model = load_model('modello_cnn.h5')  # Sostituisci con il percorso al tuo modello
+
+# Carica i dati dei 20 pazienti (supponiamo che sia un array di immagini)
+dati_pazienti = [...]  # Carica i dati dei pazienti
+
+# Ciclo per valutare ogni paziente
+for idx, immagine in enumerate(dati_pazienti):
+    # Effettua la previsione utilizzando il modello
+    previsione = model.predict(np.expand_dims(immagine, axis=0))
+
+    # Calcola le metriche
+    mse = mean_squared_error(immagine, previsione[0])
+    nrmse = np.sqrt(mse) / (immagine.max() - immagine.min())
+    ssim = structural_similarity(immagine, previsione[0], multichannel=True)
+    psnr = peak_signal_noise_ratio(immagine, previsione[0])
+
+    # Stampa i risultati delle metriche
+    print(f"Paziente {idx + 1}:")
+    print(f"MSE: {mse}")
+    print(f"NRMSE: {nrmse}")
+    print(f"SSIM: {ssim}")
+    print(f"PSNR: {psnr}")
+    print("===============================")
+
+
+#IMMAGINE RCBV RICAVATA DAL MODELLO
+import random
+subject = random.choice(training_set)
+
+input_tensor = subject['DSC'][tio.DATA].to(device)
+
+
+model.eval()
+
+with torch.no_grad():
+    pred = model(input_tensor.unsqueeze(0).to(torch.float32))
+    plt.imshow(pred[0,..., 25].cpu().squeeze())
+
+#IMMAGINE RCBV VERA
+plt.imshow(subject["rCBV"][tio.DATA][0,..., 25])
+
+#IMMAGINE DSC VERA
+plt.imshow(subject["DSC"][tio.DATA][0,..., 25])
+
+test = evaluate(model2, val_loader)
+test
+
+
+def predict_image(img, model):
+    # Convert to a batch of 1
+    xb = img  #.unsqueeze(0)
+    # Get predictions from model
+    yb = model(xb)
+
+## Testing test e Analisi statistica
+
+# Salvo il modello
+torch.save(model.state_dict(), 'CNN7_model.pth')
+
+# Visualizza il contenuto della directory temporanea di Colab
+temporary_directory = '/content'
+print(os.listdir(temporary_directory))
+
+from skimage.metrics import mean_squared_error, structural_similarity, peak_signal_noise_ratio
+from tensorflow.keras.models import load_model
+
+# Carica il modello addestrato
+model.load_state_dict(torch.load('/content/CNN7_model.pth'))
+
+# Creazione di una lista per salvare le previsioni
+pred = []
+
+# Creazione di una lista per salvare le metriche MSE
+mse_values = []
+
+
+# model2.load_state_dict(best_model_cp['model_state_dict'])
+model.eval()
+
+with torch.no_grad():
+
+  # Ciclo per valutare ogni paziente
+  for idx, immagine in enumerate(test_set):
+      #print(idx, immagine)
+
+      #carico immagine DSC
+      input_tensor = immagine['DSC'][tio.DATA].to(device).unsqueeze(0)
+      output_tensor = immagine['rCBV'][tio.DATA].to(device).unsqueeze(0).cpu().numpy()
+      #print(output_tensor.shape)
+      pred = model(input_tensor).cpu().numpy()
+      #print(pred.shape)
+
+      # Calcola le metriche
+      mse_ = np.square(np.subtract(pred, output_tensor)).mean()  # Calcola l'errore quadratico medio
+      nrmse_ = nrmse(output_tensor, pred)  # Calcola l'errore quadratico medio normalizzato
+      ssim_ = structural_similarity(output_tensor.squeeze().squeeze(), pred.squeeze().squeeze(), data_range=pred.max() - pred.min())  # Calcola l'indice di similarità strutturale
+      psnr_ = psnr(output_tensor, pred, data_range=pred.max() - pred.min())  # Calcola il rapporto segnale-rumore di picco
+
+      # Calcola le metriche
+      #mse = mean_squared_error(immagine, pred[0])
+      #nrmse = np.sqrt(mse) / (immagine.max() - immagine.min())
+      #ssim = structural_similarity(immagine, pred[0], multichannel=True)
+      #psnr = peak_signal_noise_ratio(immagine, pred[0])
+
+      # Stampa i risultati delle metriche
+      print(f"Paziente {idx + 1}:")
+      print(f"MSE: {mse_}")
+      print(f"NRMSE: {nrmse_}")
+      print(f"SSIM: {ssim_}")
+      print(f"PSNR: {psnr_}")
+      print("===============================")
