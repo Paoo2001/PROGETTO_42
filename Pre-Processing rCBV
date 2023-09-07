@@ -1,0 +1,58 @@
+!pip install torchio
+
+import pandas as pd
+import numpy as np
+import torch
+import os.path
+import shutil
+import nibabel as nib
+import torchio as tio
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+patients_list = [f.name for f in os.scandir('/content/drive/MyDrive/test set') if f.is_dir()]
+print(patients_list)
+
+subjects_list = []
+for current in patients_list:
+  subject_dict = {'rCBV': tio.ScalarImage('/content/drive/MyDrive/test set/' + current + '/DSC_ap-rCBV.nii'),
+                  'brain_mask': tio.LabelMap('/content/drive/MyDrive/test set/' + current + '/brain_mask.nii')
+                 }
+  subject = tio.Subject(subject_dict)
+  subjects_list.append(subject)
+
+  subject_dataset = tio.SubjectsDataset(subjects_list)
+
+pre_processing = tio.Compose([
+    tio.ToCanonical(),
+    tio.ZNormalization(masking_method='brain_mask'),
+    #tio.Crop((60, 60, 38)),
+    tio.CropOrPad((120,120,80),mask_name='brain_mask'),
+    tio.Resample((2,2,2)),
+])
+
+dataset = tio.SubjectsDataset(subject_dataset, transform = pre_processing)
+
+i = 0
+
+for current in patients_list:
+  #DSC = dataset[i].DSC.tensor
+  rCBV = dataset[i].rCBV.tensor
+  #print(dataset[0]["rCBV"][tio.DATA].dtype)
+  rCBV = rCBV.squeeze()
+  #print(rCBV.shape)
+
+  #DSC = nib.Nifti1Image(DSC.numpy(), None)
+  rCBV = nib.Nifti1Image(rCBV.numpy(), affine = dataset[i].rCBV.affine)
+
+  #crea nuova cartella
+  new_path = '/content/drive/MyDrive/Dataset filtrato' + "/" + current
+  if not os.path.exists(new_path):
+    os.makedirs(new_path)
+
+  #nib.save(DSC, new_path + '/' + 'DSC.nii')
+  nib.save(rCBV, new_path + '/' + 'DSC_ap-rCBV.nii')
+  i = i+1
+  print(i, ') ' + current + ' OK')
+
