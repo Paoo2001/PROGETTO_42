@@ -50,65 +50,6 @@ Conversione del dataset creato in tensore
 dataset = tio.SubjectsDataset(patients_list)
 print('Dataset size:', len(dataset), 'patients')
 
-#print(dataset.dry_iter())
-
-#for i in range(len(dataset)):
-#  print(f"paziente {i}:")
-#  subject = dataset[i]
-#  for key, image in subject.items():
-#    tensor = image.data
-#    print(f"  {key}: {tensor.shape}")
-
-#creazione mask
-#  rcbv_img=nib.load(subj_dir + "/DSC_ap-rCBV.nii")
-  # converte l'immagine rCBV in un tensore PyTorch
-#  rcbv_tensor = torch.from_numpy(rcbv_img.get_fdata())
-#  # crea la brain_Mask selezionando i valori maggiori di 0
-#  brain_mask = torch.where(rcbv_tensor > 0, torch.tensor([1]), torch.tensor([0]))
-#  # crea un oggetto Nifti1Image a partire dal tensore PyTorch della brain_mask
-#  brain_mask_nifti = nib.Nifti1Image(brain_mask.numpy(), rcbv_img.affine)
-#  # salva l'immagine della brain_mask come file NIfTI-1 nella cartella
-#  nib.save(brain_mask_nifti, subj_dir + '/brain_mask.nii')
-
-
-#brain_mask = tio.LabelMap(subj_dir + '/brain_mask.nii')
-#patient_x.brain_mask.plot()
-#tio.ZNormalization(masking_method='brain_mask'),
-
-# verifica su un paziente delle proprietà delle immagini
-#patient_x = dataset[1] # numero casuale
-#print('Shape of DSC images', patient_x.DSC.shape)
-#print('Size of DSC images', patient_x.DSC.spacing)
-#print('Shape of rCBV images', patient_x.rCBV.shape)
-#print('Size of rCBV images', patient_x.rCBV.spacing)
-#print('Size of brain mask', patient_x.brain_mask)
-#patient_x.brain_mask.plot()
-
-PREPARAZIONE DEI DATI (TRASFORMAZIONI)
-
-Data for Training set and Validation set
-
-# suddivisione del dataset, in modo casuale, in dati di training (70% dei dati) e di validation (20% dei dati).
-#training_division = 0.7   # definizione della % di dati di training
-#validation_division = 0.2 # definizione della % di dati di validation
-#test_division = 0.1
-
-#num_patients = len(dataset) # pazienti totali
-#training_patients = int(training_division*num_patients)
-#validation_patients = int(validation_division*num_patients)
-#test_patients = int(num_patients-(training_patients+validation_patients))
-
-# creazione dei due sottoinsiemi
-#patients_division = training_patients, validation_patients, test_patients
-#training, validation, testing = torch.utils.data.random_split(patients_list, patients_division)
-
-#training_set = tio.SubjectsDataset(training)
-#print('training_set:', len(training_set)) # per verificare il numero di dati di training
-#validation_set = tio.SubjectsDataset(validation)
-#print('validation_set:', len(validation_set))
-#test_set = tio.SubjectsDataset(testing)
-#print('test_set:', len(test_set))
-
 VERSIONE ALTERNATIVA CON IL TEST CHE PRENDE I PRIMI 20 PAZIENTI DEL DATASET IN MODO DA POTER FARE IL TEST DI WILCOXON ALLA FINE.
 
 test_set = tio.SubjectsDataset(patients_list[:20])  # Primi 20 pazienti per il testing set (in ordine)
@@ -149,50 +90,6 @@ test_set_folders_sorted = sorted(test_set_folders)
 
 for folder_name in test_set_folders_sorted:
     print(folder_name)
-
-#training_set[0]["DSC"].plot()
-#training_set[0]["rCBV"].plot()
-
-#print('Shape of DSC images', training_set[0]["DSC"][tio.DATA].shape)
-
-#print('Shape of rCBV images', training_set[0]["rCBV"][tio.DATA].shape)
-
-##COME VISUALIZZARE TIPO E IMMAGINE INPUT OUTPUT
-
-#training_set[0].DSC, training_set[0].rCBV
-
-#visualizzare un'immagine specifica
-#nii_image = tio.ScalarImage('/content/drive/MyDrive/Data/UPENN-GBM-00001_11/DSC.nii')
-#nii_array = nii_image.numpy() #bisogna trasformare l'immagin ein vettore con il comando numpy()
-#plt.imshow(nii_array[1, :, :, 50], cmap='gray') #time_frame,x,y,z
-#plt.show()
-
-#visualizzare un dataset
-#paziente_1 = dataset[0]
-#paziente_1.plot() #vedo sia DSC che rCBV
-#patient.DSC.plot() #vedo solo DSC plot
-#patient.rCBV.plot() #vedo solo rCBV plot
-
-#def masking(dataset):
-#  for i in range(len(dataset)):
-#    mask = dataset[i]["DSC"][tio.DATA] > 0
-#   print(mask.shape)
-#    dataset[i]["mask"] = mask
-
-#masking(dataset)
-
-#dataset[0]["mask"].plot()
-#dataset[1]["mask"].plot()
-
- #visualizzare info
-#print(paziente_1.DSC.shape)
-#mask = dataset[0]["DSC"][tio.DATA]>0
-#print(mask.shape)
-
-#print(paziente_1.DSC)
-#print(paziente_1.rCBV)
-
-Data Augmentation
 
 ##Creazione del DataLoader
 
@@ -257,22 +154,6 @@ val_loader = DeviceDataLoader(val_loader, device) # idem per il val_loader
 print(device)
 
 CREAZIONE DEL MODELLO
-
-#type(training_set[0].DSC),
-#training_set[0]["rCBV"].data #1: dice il tipo di dato che si ha #2: printa il contenuto del tensore
-
-#def show_batch_DSC(data_loader):
-#  for batch_idx, batch_sample in enumerate(data_loader):
-#    images = batch_sample["DSC"][tio.DATA]
-#    img_DSC = images[0, 0, :, :, 50] #prendo solo la prima immagine, le x e le y della 50 fetta sulle z del time frame 0.
-
-#    # Visualizzazione delle prime 4 immagini della batch
-#    plt.imshow(img_DSC, cmap="gray")
-#    plt.show()    # Interrompi l'iterazione dopo la prima batch
-#    break
-
-#show_batch_DSC(train_loader)
-
 def prepare_batch(batch, device): # estrae l'input e l'output desiderati da una singola batch di dati del loader e li restituisce come tensori PyTorch
     inputs = batch["DSC"][tio.DATA].to(device) # tensore
     targets = batch["rCBV"][tio.DATA].to(device) # tensore
@@ -593,13 +474,6 @@ scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.01, epochs=5
 # initialize SaveBestModel class
 save_best_model = SaveBestModel()
 
-#print('Loading best epoch saved model weights...')
-#model2.load_state_dict(best_model_cp['cnn_state_dict.pth'])
-## optimizer
-#optimizer.load_state_dict(best_model_cp['optimizer_state_dict'])
-## scheduler
-#scheduler.load_state_dict(best_model_cp['scheduler_state_dict'])
-
 # Salvo il modello
 torch.save(model.state_dict(), 'model.pth')
 
@@ -705,12 +579,6 @@ with torch.no_grad():
       nrmse_ = nrmse(output_tensor, pred)  # Calcola l'errore quadratico medio normalizzato
       ssim_ = structural_similarity(output_tensor.squeeze().squeeze(), pred.squeeze().squeeze(), data_range=pred.max() - pred.min())  # Calcola l'indice di similarità strutturale
       psnr_ = psnr(output_tensor, pred, data_range=pred.max() - pred.min())  # Calcola il rapporto segnale-rumore di picco
-
-      # Calcola le metriche
-      #mse = mean_squared_error(immagine, pred[0])
-      #nrmse = np.sqrt(mse) / (immagine.max() - immagine.min())
-      #ssim = structural_similarity(immagine, pred[0], multichannel=True)
-      #psnr = peak_signal_noise_ratio(immagine, pred[0])
 
       # Stampa i risultati delle metriche
       print(f"Paziente {idx + 1}:")
