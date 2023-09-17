@@ -2,8 +2,6 @@
 Genereazione di mappe di perfusione cerebrale rCBV a partire da immagini di Risonanza Magnetica DSC utilizzando un modello CNN.
 
 !pip install numpy torch torchvision torchio matplotlib torchinfo torchmetrics
-
-
 # imports
 import torch
 import torchio as tio
@@ -33,14 +31,6 @@ for f in os.scandir(data_dir): # restituisce un iteratore sugli elementi present
   if f.is_dir(): # se l'elemento è una directory, allora viene aggiungo alla lista
     patients_ID.append(f.name) # riempimento della lista patients_ID con tutti i nomi delle directory che sono contenuti in data e soddisfano l'if
 
-# patients_ID
-
-#data = '/content/drive/MyDrive/Dataset filtrato'  # directory
-#patients_ID = []
-#for f in os.scandir(data):
-#  if f.is_dir():
-#    patients_ID.append(f.name) # riempimento della lista patients_ID con tutti i nomi delle directory che sono contenuti in data e soddisfano l'if
-
 # Creazione di una lista patients_list
 patients_list = []
 for current in patients_ID:
@@ -57,68 +47,13 @@ for current in patients_ID:
   except:
     print(subj_dir)
 
-  #patient.DSC.set_data(patient.DSC.data.to(torch.float32))
-  #patient.rCBV.set_data(patient.rCBV.data.to(torch.float32))
-
-
-
-
-L'oggetto "patient" rappresenta un paziente specifico, contenente il nome del paziente e le immagini DSC e rCBV del paziente.
+#L'oggetto "patient" rappresenta un paziente specifico, contenente il nome del paziente e le immagini DSC e rCBV del paziente.
 
 len(patients_list)
 
 #Creazione Dataset
 dataset = tio.SubjectsDataset(patients_list)
 print('Dataset size:', len(dataset), 'patients')
-
-#for subject in dataset:
-#    print(subject)
-
-#print(dataset[0]["DSC"][tio.DATA].dtype),
-#print(dataset[0]["rCBV"][tio.DATA].dtype)
-
-### Visualizzare tipo e immagine input output
-
-## Training e Validation set
-
-### Preparazione dei dati (trasformazioni)
-
-#training_transform = tio.Compose([
-#    tio.RandomAffine(degrees=15, scales=(0.9, 1.1), image_interpolation='linear'),
-#    tio.RandomFlip(axes=(0, 1, 2)),
-#    tio.RandomElasticDeformation(num_control_points=7, max_displacement=7),
-    #tio.RandomGamma(),
-#    tio.RandomBlur(std=(0.1, 1.0)),
-#    tio.RandomNoise(std=(0.01, 0.1)),
-    #tio.RandomAnisotropy(axes=(0, 1, 2)),
-#    tio.RandomBiasField(coefficients=(0.1, 0.1)),
-#])
-
-### Divisione del dataset
-
-# suddivisione del dataset, in modo casuale, in dati di training (70% dei dati) e di validation (30% dei datiG). #MANCA 10% PER IL TESTING!!!
-#training_division = 0.7   # definizione della % di dati di training
-#validation_division = 0.2 # definizione della % di dati di validation
-#test_division = 0.1
-
-#num_patients = len(dataset) # pazienti totali
-#train_patients = int(training_division*num_patients)
-#val_patients = int(validation_division*num_patients)
-#test_patients = int(num_patients-(train_patients+val_patients))
-
-# creazione dei tre sottoinsiemi
-#patients_division = train_patients, val_patients, test_patients
-#train, val, test = torch.utils.data.random_split(patients_list, patients_division) # suddivido casualmente la lista di pazienti in tre sottoinsiemi
-
-#training_set = tio.SubjectsDataset(train) #training_set = tio.SubjectsDataset(train, transform=training_transform)
-#print('train_set:', len(training_set)) # per verificare il numero di dati di training
-#validation_set = tio.SubjectsDataset(val) #validation_set = tio.SubjectsDataset(val, transform=validation_transform)
-#print('val_set:', len(validation_set)) # per verificare il numero di dati di validation
-#test_set = tio.SubjectsDataset(test)
-#print('test_set:', len(test_set))
-
-VERSIONE ALTERNATIVA CON IL TEST CHE PRENDE I PRIMI 20 PAZIENTI DEL DATASET IN MODO DA POTER FARE IL TEST DI WILCOXON ALLA FINE.
-
 test_set = tio.SubjectsDataset(patients_list[:20])  # Primi 20 pazienti per il testing set (in ordine)
 remaining_patients = tio.SubjectsDataset(patients_list[20:]) # Pazienti rimanenti per il training e validation set
 
@@ -245,7 +180,6 @@ train_loader = DeviceDataLoader(train_loader, device)  # crea un DeviceDataLoade
 val_loader = DeviceDataLoader(val_loader, device) # idem per il val_loader
 
 ## Creazionde del modello
-
 def prepare_batch(batch, device): # estrae l'input e l'output desiderati da una singola batch di dati del loader e li restituisce come tensori PyTorch
     inputs = batch["DSC"][tio.DATA].to(device).to(torch.float32) # tensore
     targets = batch["rCBV"][tio.DATA].to(device) # tensore
@@ -368,9 +302,6 @@ model = CustomUNet(45,1)#.to('cuda')
 
 # sposto il modello sulla GPU
 model = to_device(model, device)
-#print(model)
-#print('Modello su dispositivo:', next(model.parameters()).device)
-
 summary(model.cuda())
 
 ## Training del modello
@@ -470,10 +401,6 @@ def fit_one_cycle(epochs, max_lr, model, train_loader, val_loader,
     return history
 
 print(model)
-
-#summary(model.cuda(), input_size=(2,45,60,60,40))
-
-
 import time
 
 # loss function
@@ -532,10 +459,6 @@ plt.imshow(subject["rCBV"][tio.DATA][0,..., 25])
 
 #IMMAGINE DSC VERA
 plt.imshow(subject["DSC"][tio.DATA][0,..., 25])
-
-#possiamo concludere che la history 6 è inutile perchè la train loss continua a diminuire e la val loss aumenta. Quindi da qui in poi si va in overfitting
-
-#ottiene la val_Los più bassa ad epoca 12.
 
 import numpy as np
 
@@ -643,13 +566,7 @@ with torch.no_grad():
       ssim_ = structural_similarity(output_tensor.squeeze().squeeze(), pred.squeeze().squeeze(), data_range=pred.max() - pred.min())  # Calcola l'indice di similarità strutturale
       psnr_ = psnr(output_tensor, pred, data_range=pred.max() - pred.min())  # Calcola il rapporto segnale-rumore di picco
 
-      # Calcola le metriche
-      #mse = mean_squared_error(immagine, pred[0])
-      #nrmse = np.sqrt(mse) / (immagine.max() - immagine.min())
-      #ssim = structural_similarity(immagine, pred[0], multichannel=True)
-      #psnr = peak_signal_noise_ratio(immagine, pred[0])
-
-      # Stampa i risultati delle metriche
+# Stampa i risultati delle metriche
       print(f"Paziente {idx + 1}:")
       print(f"MSE: {mse_}")
       print(f"NRMSE: {nrmse_}")
