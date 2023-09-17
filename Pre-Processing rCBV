@@ -37,21 +37,14 @@ dataset = tio.SubjectsDataset(subject_dataset, transform = pre_processing)
 i = 0
 
 for current in patients_list:
-  #DSC = dataset[i].DSC.tensor
   rCBV = dataset[i].rCBV.tensor
-  #print(dataset[0]["rCBV"][tio.DATA].dtype)
   rCBV = rCBV.squeeze()
-  #print(rCBV.shape)
-
-  #DSC = nib.Nifti1Image(DSC.numpy(), None)
   rCBV = nib.Nifti1Image(rCBV.numpy(), affine = dataset[i].rCBV.affine)
 
   #crea nuova cartella
   new_path = '/content/drive/MyDrive/Dataset filtrato' + "/" + current
   if not os.path.exists(new_path):
     os.makedirs(new_path)
-
-  #nib.save(DSC, new_path + '/' + 'DSC.nii')
   nib.save(rCBV, new_path + '/' + 'DSC_ap-rCBV.nii')
   i = i+1
   print(i, ') ' + current + ' OK')
